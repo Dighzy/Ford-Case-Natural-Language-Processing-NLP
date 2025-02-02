@@ -37,9 +37,3 @@ env.bak/
 venv.bak/
 
 
-
-# Files
-*.csv
-*.json
-*.h5
-
