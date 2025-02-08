@@ -18,7 +18,7 @@ app = Flask(__name__)
 # Load models
 bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 bert_model = BertModel.from_pretrained('bert-base-uncased')
-custom_model = load_model('./models/best_model_1.h5')
+custom_model = load_model('./models/best_model.h5')
 
 # Load car models list
 with open("./models/models_params.json", "r") as file:
