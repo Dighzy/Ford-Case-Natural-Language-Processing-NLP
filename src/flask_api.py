@@ -1,129 +1,129 @@
-import re
 import json
-import torch
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
-from textblob import TextBlob
-from transformers import BertTokenizer, BertModel
-from sklearn.preprocessing import StandardScaler
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
+from flask_restx import Api, Resource, fields
 from tensorflow.keras.models import load_model
-import joblib
 
-# Initialize Flask app
+from process_data import preprocess_text, get_model_embedding, get_sentiment_and_count, get_topics, get_processed_features
+
+# Initialize Flask app and API
 app = Flask(__name__)
+api = Api(app, version="1.0", title="Car Issue Classification API", description="An API for classifying car issues using machine learning.")
 
-# Load models
-bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bert_model = BertModel.from_pretrained('bert-base-uncased')
-custom_model = load_model('./models/best_model.h5')
+ns = api.namespace("api", description="Endpoints")
 
-# Load car models list
-with open("./models/models_params.json", "r") as file:
-    car_models = json.load(file)['models']
+# Load the trained model
+custom_model = load_model("models/best_model.h5")
 
-# Load trained scaler
-with open("./models/scaler_params.json", "r") as file:
-    scaler_params = json.load(file)
-scaler = StandardScaler()
-scaler.mean_ = np.array(scaler_params["mean"])
-scaler.scale_ = np.array(scaler_params["scale"])
+# Load available car models
+with open("models/params/models_params.json", "r") as file:
+    car_models = json.load(file)["models"]
 
-# Load pre-trained TF-IDF and LDA models
-tfidf_vectorizer = joblib.load("./models/tfidf_vectorizer.pkl")
-lda_model = joblib.load("./models/lda_model.pkl")
+# Define request model for prediction
+predict_model = api.model("PredictionRequest", {
+    "summary": fields.String(required=True, description="Summary of the car issue"),
+    "model": fields.String(required=True, description="Car model name")
+})
 
-# Text preprocessing function
-def preprocess_text(text):
-    text = re.sub(r'\W', ' ', text).lower().strip()
-    return ' '.join(text.split())
+# Define response model for prediction
+predict_response = api.model("PredictionResponse", {
+    "summary": fields.String(description="Original summary"),
+    "model": fields.String(description="Car model name"),
+    "predicted_categories": fields.List(fields.String, description="Predicted issue categories"),
+    "probabilities": fields.List(fields.Float, description="Prediction probabilities for each category")
+})
 
-# Function to generate BERT embeddings
-def get_model_embedding(text):
-    if not text:
-        return -0.5  # Placeholder for missing embedding
+# Define request model for sentiment analysis
+sentiment_model = api.model("SentimentRequest", {
+    "summary": fields.String(required=True, description="Summary of the car issue")
+})
 
-    inputs = bert_tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-    with torch.no_grad():
-        outputs = bert_model(**inputs)
-    return outputs.last_hidden_state.mean(dim=1).squeeze().numpy() 
+# Define response model for sentiment analysis
+sentiment_response = api.model("SentimentResponse", {
+    "summary": fields.String(description="Original summary"),
+    "sentiment": fields.String(description="Sentiment classification"),
+    "word_count": fields.Integer(description="Word count in summary")
+})
 
-# Function to extract additional features
-def extract_additional_features(text, model):
-    # Preprocess text
-    processed_text = preprocess_text(text)
-    word_count = len(processed_text.split())
-    char_count = len(processed_text)
-    sentiment = TextBlob(processed_text).sentiment.polarity
+def get_parameters(df):
+    """Process text and extract necessary features for model prediction."""
+    df["processed_summary"] = df["summary"].apply(preprocess_text)
+    df["summary_embedding"] = df["summary"].apply(get_model_embedding)
+    df["model_embedding"] = df["Model"].apply(get_model_embedding)
 
-    # Generate TF-IDF vector and topic features
-    tfidf_vector = tfidf_vectorizer.transform([processed_text])
-    topic_vector = lda_model.transform(tfidf_vector).flatten()
+    df = get_sentiment_and_count(df)
+    df = get_topics(df)
 
-    # Assign topic values to separate variables
-    topic_1, topic_2 = topic_vector[0], topic_vector[1]
+    embeddings, additional_features = get_processed_features(df)
 
-    # Generate model embedding (scalar for simplicity)
-    model_embedding = get_model_embedding(model)
-    model_embedding= np.array(model_embedding.tolist())
+    return embeddings, additional_features
 
-    # Combine features into a structured dictionary
-    features = {
-        "model_embedding": model_embedding,
-        "word_count": word_count,
-        "char_count": char_count,
-        "sentiment": sentiment,
-        "topic_1": topic_1,
-        "topic_2": topic_2
-    }
+@ns.route("/health")
+class HealthCheck(Resource):
+    @api.doc(description="Check if the API is running.")
+    def get(self):
+        return {"status": "ok"}, 200
 
-    # Convert features to DataFrame for consistency
-    feature_df = pd.DataFrame([features])
-    
-    # Normalize the features
-    scaled_features = scaler.transform(feature_df)
+@ns.route("/models")
+class AvailableModels(Resource):
+    @api.doc(description="Get the list of available car models.")
+    def get(self):
+        return {"available_models": car_models}
 
-    return scaled_features
+@ns.route("/predict")
+class Predict(Resource):
+    @api.expect(predict_model)
+    @api.marshal_with(predict_response)
+    @api.doc(description="Predict car issue categories based on summary and model.")
+    def post(self):
+        input_data = request.json
+        text = input_data.get("summary")
+        model_name = input_data.get("model")
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    input_data = request.json
-    text = input_data.get('summary')
-    model_name = input_data.get('model')
+        if not text or not model_name:
+            api.abort(400, "Both 'summary' and 'model' must be provided.")
 
-    if not text or not model_name:
-        return jsonify({"error": "Both 'summary' and 'model' must be provided."}), 400
-    
-    #print('here1', text)
+        df = pd.DataFrame({"summary": [text], "Model": [model_name]})
+        embeddings, additional_features = get_parameters(df)
 
-    # Generate features
-    embedding = get_model_embedding(text)
-    embedding= np.array(embedding.tolist())
-    print('here', embedding)
-    #embedding = np.expand_dims(embedding, axis=0)  # Ensure shape (1, 768)
+        # Make predictions
+        prediction = custom_model.predict({
+            "embedding_input": embeddings,
+            "additional_input": additional_features
+        })
 
-    additional_features = extract_additional_features(text, model_name)  # Already (1, 6)
+        categories = ["Engine and Performance", "Electrical System", "Other Problems", "Structure and Control", "Safety and Brakes"]
+        predicted_categories = [categories[i] for i, prob in enumerate(prediction[0]) if prob > 0.5]
 
-    # Make predictions
-    prediction = custom_model.predict({
-        "embedding_input": embedding,
-        "additional_input": additional_features
-    })
+        return {
+            "summary": text,
+            "model": model_name,
+            "predicted_categories": predicted_categories,
+            "probabilities": prediction[0].tolist()
+        }
 
-    # Format response
-    categories = ["Engine and Performance", "Electrical System", "Other Problems", "Structure and Control", "Safety and Brakes"]
-    predicted_categories = [categories[i] for i, prob in enumerate(prediction[0]) if prob > 0.5]
+@ns.route("/sentiment")
+class SentimentAnalysis(Resource):
+    @api.expect(sentiment_model)
+    @api.marshal_with(sentiment_response)
+    @api.doc(description="Analyze the sentiment of a given summary.")
+    def post(self):
+        input_data = request.json
+        text = input_data.get("summary")
 
-    response = {
-        "summary": text,
-        "model": model_name,
-        "predicted_categories": predicted_categories,
-        "probabilities": prediction[0].tolist()
-    }
-    return jsonify(response)
+        if not text:
+            api.abort(400, "The field 'summary' is required.")
 
-# Run the Flask app
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+        df = pd.DataFrame({"summary": [text]})
+        df["processed_summary"] = df["summary"].apply(preprocess_text)
+        df = get_sentiment_and_count(df)
+
+        return {
+            "summary": text,
+            "sentiment": df["sentiment"].iloc[0],
+            "word_count": df["word_count"].iloc[0]
+        }
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)

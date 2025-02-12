@@ -43,6 +43,10 @@ def preprocess_text(text):
     return ' '.join(words)
 
 def get_model_embedding(text):
+    #In these case i decided to use bert because its a more robust model that generates contextual embeddings.
+    #This is important for analyzing complaints, as it helps capture the full meaning of the text and identify patterns or issues more accurately
+    #I chose BERT over other models because its lighter while still providing strong contextual embeddings without needing a complete transformer
+
      # Load the pre-trained BERT model and tokenizer
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     model = BertModel.from_pretrained('bert-base-uncased')
@@ -108,9 +112,6 @@ def get_processed_features(df):
     return embeddings, additional_features
 
 
-
-
-
 if __name__ == "__main__":
     
     """ Seeding """
@@ -120,16 +121,26 @@ if __name__ == "__main__":
     df = pd.read_csv('data/raw/full_data_2021_FORD.csv')
     df_final = df.head(5).copy()
 
-
-
+    # Getting model types
+    models = df_final['Model'].unique().tolist()
+    model_data = {
+        "models":models
+    }
+    with open('models/params/models_params.json', 'w') as f:
+        json.dump(model_data, f)
+    
+    # Text preprocessing function
     df_final['processed_summary'] = df_final['summary'].apply(preprocess_text)
+
+    # Get embeddings
     df_final['summary_embedding'] = df_final['summary'].apply(get_model_embedding)
     df_final['model_embedding'] = df_final['Model'].apply(get_model_embedding)
 
-
+    # Get sentiment and topics
     df_final = get_sentiment_and_count(df_final)
     df_final = get_topics(df_final)
 
+    # Processing and normalazing the embedding and additional_features
     embeddings, additional_features = get_processed_features(df_final)
 
     # Verify the shapes of the data
@@ -138,6 +149,3 @@ if __name__ == "__main__":
 
     print("embeddings:", embeddings)
     print("additional_features:", additional_features)
-
-
-

@@ -54,8 +54,75 @@ To set up the project environment, you have two options. You can either use the 
     conda activate ford_case_iel
       ```
 
+## API Endpoints
+
+The API provides multiple endpoints to interact with the model. Below is the documentation for each endpoint.
+
+### 🔹 Health Check
+**Endpoint:**  
+`GET /health`
+
+**Description:**  
+Checks if the API is running.
+
+---
+
+### 🔹 Get Available Models
+**Endpoint:**  
+`GET /models`
+
+**Description:**  
+Returns a list of available car models.
+
+---
+
+### 🔹 Sentiment Analysis
+**Endpoint:**  
+`POST /sentiment`
+
+**Description:**  
+Analyzes the sentiment of a given complaint text.
+
+---
+
+### 🔹 Predict Vehicle Issue
+**Endpoint:**  
+`POST /predict`
+
+**Description:**  
+Classifies a vehicle complaint into predefined categories.
+
+**Request Example:**
+
+```json
+{
+  "summary": "My engine makes a weird noise when accelerating.",
+  "model": "RANGER SUPER CAB"
+}
+```
+
+### How to Consume the API
+
+You can interact with the API using curl, Python's requests library, or tools like Postman or Swagger UI.
+
+#### Using Swagger UI
+Swagger UI provides a user-friendly interface to interact with the API directly in your browser. Here's how you can use it:
+
+1. Open the Swagger UI in your browser. (http://127.0.0.1:5000/)
+2. Use the input fields provided for each endpoint (like /health, /  models, /predict, and /sentiment).
+3. Click "Execute" to make requests and view responses.
+
+#### Using curl
 
 
+```json
+curl -X POST "http://localhost:5000/api/predict" \
+     -H "Content-Type: application/json" \
+     -d '{"summary": "The brakes are not working properly.", 
+     "model": "RANGER SUPER CAB"}'
+```
+
+---
 
 ## Steps for Data Processing and Model Development
 <img src="data/outputs/pipeline.png" width="600px" />
